@@ -1,6 +1,15 @@
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::process::exit;
 use std::str::FromStr;
+
+pub fn input() -> String {
+    let sin = io::stdin();
+    let mut buf = String::new();
+
+    let _ = sin.lock().read_to_string(&mut buf);
+
+    buf
+}
 
 pub fn prompt<T: FromStr>(msg: &str) -> T {
     print!("{}", msg);
@@ -34,6 +43,18 @@ pub fn lines<T: FromStr>() -> Vec<T> {
                 exit(1);
             }
         })
+        .map(|line| match T::from_str(line.trim_end_matches("\n")) {
+            Ok(t) => t,
+            Err(_) => {
+                eprintln!("unable to parse {:?} into {}", line, stringify!(T));
+                exit(1);
+            }
+        })
+        .collect()
+}
+
+pub fn split<T: FromStr>(buf: String, pat: &str) -> Vec<T> {
+    buf.split(pat)
         .map(|line| match T::from_str(line.trim_end_matches("\n")) {
             Ok(t) => t,
             Err(_) => {
