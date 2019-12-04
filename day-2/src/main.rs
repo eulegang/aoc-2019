@@ -3,9 +3,12 @@ use utils::{input, split};
 fn main() {
     let mut buf = split(input(), ",");
 
-    let mut machine = machine::Machine::new(&mut buf);
+    let mut machine = machine::IntCode::new(&mut buf);
+
+    machine[1] = 12;
+    machine[2] = 2;
 
     machine.run();
 
-    println!("{:?}", machine);
+    println!("{:?}", machine[0]);
 }
