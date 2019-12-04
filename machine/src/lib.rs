@@ -1,46 +1,74 @@
 #[derive(Debug)]
-pub struct Machine<'a> {
+pub struct IntCode<'a> {
     space: &'a mut [u32],
+    on: bool,
+    ip: usize,
 }
 
-const PC_STRIDE: usize = 4;
+enum OpCode {
+    Add,
+    Mult,
+    Quit,
+}
 
-impl<'a> Machine<'a> {
-    pub fn new(buf: &'a mut [u32]) -> Machine<'a> {
-        Machine { space: buf }
+impl OpCode {
+    fn decode(code: u32) -> OpCode {
+        match code {
+            1 => OpCode::Add,
+            2 => OpCode::Mult,
+            99 => OpCode::Quit,
+            unrecognized => panic!("unrecognized opcode: {}", unrecognized),
+        }
+    }
+
+    fn effect(&self, vm: &mut IntCode<'_>) {
+        use OpCode::*;
+        match self {
+            Add => {
+                let addr = vm.deref_arg(2);
+                vm[addr] = vm[vm.deref_arg(0)] + vm[vm.deref_arg(1)];
+            }
+            Mult => {
+                let addr = vm.deref_arg(2);
+                vm[addr] = vm[vm.deref_arg(0)] * vm[vm.deref_arg(1)];
+            }
+            Quit => vm.on = false,
+        }
+    }
+
+    fn stride(&self) -> usize {
+        use OpCode::*;
+
+        match self {
+            Add | Mult => 4,
+            Quit => 1,
+        }
+    }
+}
+
+impl<'a> IntCode<'a> {
+    pub fn new(space: &'a mut [u32]) -> IntCode<'a> {
+        let on = true;
+        let ip = 0;
+
+        IntCode { space, on, ip }
     }
 
     pub fn run(&mut self) {
-        let mut pc = 0;
+        while self.on {
+            let opcode = OpCode::decode(self[self.ip]);
 
-        while let Some(next) = self.step(pc) {
-            pc = next;
+            opcode.effect(self);
+
+            self.ip += opcode.stride();
         }
     }
-
-    fn deref(&self, addr: usize) -> usize {
-        self[addr] as usize
-    }
-
-    fn step(&mut self, pc: usize) -> Option<usize> {
-        match self.space[pc] {
-            1 => {
-                let addr = self.deref(pc + 3);
-                self[addr] = self[self.deref(pc + 1)] + self[self.deref(pc + 2)];
-                Some(pc + PC_STRIDE)
-            }
-            2 => {
-                let output_addr = self[pc + 3] as usize;
-                self[output_addr] = self[self.deref(pc + 1)] * self[self.deref(pc + 2)];
-                Some(pc + PC_STRIDE)
-            }
-            99 => None,
-            otherwise => panic!("undefined opcode {}", otherwise),
-        }
+    fn deref_arg(&self, offset: usize) -> usize {
+        self[self.ip + 1 + offset] as usize
     }
 }
 
-impl<'a> std::ops::Index<usize> for Machine<'a> {
+impl<'a> std::ops::Index<usize> for IntCode<'a> {
     type Output = u32;
 
     fn index(&self, pos: usize) -> &u32 {
@@ -48,7 +76,7 @@ impl<'a> std::ops::Index<usize> for Machine<'a> {
     }
 }
 
-impl<'a> std::ops::IndexMut<usize> for Machine<'a> {
+impl<'a> std::ops::IndexMut<usize> for IntCode<'a> {
     fn index_mut(&mut self, pos: usize) -> &mut u32 {
         &mut self.space[pos]
     }
@@ -61,7 +89,7 @@ mod test {
     #[test]
     fn test_basic() {
         let mut buf = [1, 9, 10, 3, 2, 3, 11, 0, 99, 30, 40, 50];
-        let mut machine = Machine::new(&mut buf);
+        let mut machine = IntCode::new(&mut buf);
 
         machine.run();
 
