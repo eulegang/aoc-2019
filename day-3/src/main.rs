@@ -9,7 +9,7 @@ fn main() {
     stdin.read_line(&mut first).unwrap();
     stdin.read_line(&mut second).unwrap();
 
-    let min = dist(
+    let min = hop(
         extract(first.trim_end_matches("\n")),
         extract(second.trim_end_matches("\n")),
     );
@@ -17,14 +17,20 @@ fn main() {
     println!("Distance: {}", min);
 }
 
+#[derive(Debug, PartialEq, Copy, Clone)]
 enum Direction {
     Up,
     Down,
     Left,
     Right,
 }
+#[derive(Debug, PartialEq, Copy, Clone)]
 struct Movement(i32, Direction);
+
+#[derive(Debug, PartialEq, Copy, Clone)]
 struct Position(i32, i32);
+
+#[derive(Debug, PartialEq, Copy, Clone)]
 enum Stretch {
     Vertical((i32, i32), i32),
     Horizontal(i32, (i32, i32)),
@@ -70,7 +76,7 @@ impl Position {
         Position(0, 0)
     }
 
-    fn next(&self, mv: Movement) -> (Position, Stretch) {
+    fn next(&self, mv: &Movement) -> (Position, Stretch) {
         let unit = mv.1.unit();
         let Position(y, x) = *self;
         let (dy, dx) = (mv.0 * unit.0, mv.0 * unit.1);
@@ -108,12 +114,20 @@ impl Stretch {
             _ => None,
         }
     }
+
+    fn len(&self) -> u32 {
+        match self {
+            Stretch::Vertical((a, b), _) => (*b - *a) as u32,
+            Stretch::Horizontal(_, (a, b)) => (*b - *a) as u32,
+        }
+    }
 }
 
 fn extract(string: &str) -> Vec<Movement> {
     string.split(",").map(|s| s.parse().unwrap()).collect()
 }
 
+#[allow(dead_code)]
 fn dist(first: Vec<Movement>, second: Vec<Movement>) -> i32 {
     let fs = stretches(first);
     let ss = stretches(second);
@@ -138,25 +152,48 @@ fn dist(first: Vec<Movement>, second: Vec<Movement>) -> i32 {
     min_dist
 }
 
+#[allow(dead_code)]
 fn hop(first: Vec<Movement>, second: Vec<Movement>) -> i32 {
-    let fs = stretches(first);
-    let ss = stretches(second);
+    let fs = dir_stretches(first);
+    let ss = dir_stretches(second);
 
     let mut min_dist = i32::max_value();
 
     let mut f_len = 0;
-    for f in &fs {
+    for (fdir, f) in &fs {
+        f_len += f.len() as i32;
         let mut s_len = 0;
 
-        for s in &ss {
+        for (sdir, s) in &ss {
+            s_len += s.len() as i32;
+
             if let Some(Position(y, x)) = f.intersection(&s) {
                 if y == 0 && x == 0 {
                     continue;
                 }
 
-                let dist = i32::abs(y) + i32::abs(x);
+                let f_dist = f_len
+                    - match (fdir, f) {
+                        (Direction::Up, Stretch::Vertical((_, b), _)) => b - y,
+                        (Direction::Down, Stretch::Vertical((a, _), _)) => y - a,
+                        (Direction::Right, Stretch::Horizontal(_, (_, b))) => b - x,
+                        (Direction::Left, Stretch::Horizontal(_, (a, _))) => x - a,
+                        (dir, stretch) => unreachable!("dir: {:?}, stretch: {:?}", dir, stretch),
+                    };
+
+                let s_dist = s_len
+                    - match (sdir, s) {
+                        (Direction::Up, Stretch::Vertical((_, b), _)) => b - y,
+                        (Direction::Down, Stretch::Vertical((a, _), _)) => y - a,
+                        (Direction::Right, Stretch::Horizontal(_, (_, b))) => b - x,
+                        (Direction::Left, Stretch::Horizontal(_, (a, _))) => x - a,
+                        (dir, stretch) => unreachable!("dir: {:?}, stretch: {:?}", dir, stretch),
+                    };
+
+                let dist = f_dist + s_dist;
+
                 if dist < min_dist {
-                    min_dist = dist;
+                    min_dist = dist
                 }
             }
         }
@@ -170,10 +207,24 @@ fn stretches(movements: Vec<Movement>) -> Vec<Stretch> {
     let mut result = Vec::new();
 
     for mv in movements {
-        let (end, stretch) = pos.next(mv);
+        let (end, stretch) = pos.next(&mv);
 
         pos = end;
         result.push(stretch);
+    }
+
+    result
+}
+
+fn dir_stretches(movements: Vec<Movement>) -> Vec<(Direction, Stretch)> {
+    let mut pos = Position::origin();
+    let mut result = Vec::new();
+
+    for mv in movements {
+        let (end, stretch) = pos.next(&mv);
+
+        pos = end;
+        result.push((mv.1, stretch));
     }
 
     result
@@ -212,24 +263,22 @@ mod test {
         let first = extract("R8,U5,L5,D3");
         let second = extract("U7,R6,D4,L4");
 
-        assert_eq!(dist(first, second), 40);
+        assert_eq!(hop(first, second), 30);
     }
 
     #[test]
-    #[ignore]
     fn test_hop_1() {
         let first = extract("R75,D30,R83,U83,L12,D49,R71,U7,L72");
         let second = extract("U62,R66,U55,R34,D71,R55,D58,R83");
 
-        assert_eq!(dist(first, second), 610);
+        assert_eq!(hop(first, second), 610);
     }
 
     #[test]
-    #[ignore]
     fn test_hop2() {
         let first = extract("R98,U47,R26,D63,R33,U87,L62,D20,R33,U53,R51");
         let second = extract("U98,R91,D20,R16,D67,R40,U7,R15,U6,R7");
 
-        assert_eq!(dist(first, second), 410);
+        assert_eq!(hop(first, second), 410);
     }
 }
