@@ -8,7 +8,7 @@ fn main() {
 }
 
 #[allow(dead_code)]
-fn part1(bin: &Vec<u32>) {
+fn part1(bin: &Vec<i32>) {
     let mut buf = bin.clone();
     let mut machine = IntCode::new(&mut buf);
 
@@ -21,7 +21,7 @@ fn part1(bin: &Vec<u32>) {
 }
 
 #[allow(dead_code)]
-fn part2(bin: &Vec<u32>) {
+fn part2(bin: &Vec<i32>) {
     for noun in 0..=99 {
         for verb in 0..=99 {
             let mut buf = bin.clone();
