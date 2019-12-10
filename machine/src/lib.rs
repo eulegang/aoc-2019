@@ -1,6 +1,7 @@
 #[derive(Debug)]
 pub struct IntCode<'a> {
     space: &'a mut [i32],
+    input: Vec<i32>,
     on: bool,
     ip: i32,
 }
@@ -22,16 +23,15 @@ impl Param {
 
     fn get(&self, vm: &IntCode<'_>, arg_pos: i32) -> i32 {
         match self {
-            Param::Pos => vm[vm.ip + 1 + arg_pos],
-            Param::Inter => vm.ip + 1 + arg_pos,
+            Param::Pos => vm[vm[vm.ip + 1 + arg_pos]],
+            Param::Inter => vm[vm.ip + 1 + arg_pos],
         }
     }
 
     fn set(&self, vm: &mut IntCode<'_>, arg_pos: i32, value: i32) {
         match self {
             Param::Pos => {
-                dbg!(value);
-                let addr = vm.ip + 1 + arg_pos;
+                let addr = vm[vm.ip + 1 + arg_pos];
                 vm[addr] = value
             }
             Param::Inter => panic!("can not set in intermediate mode"),
@@ -43,6 +43,8 @@ impl Param {
 enum OpCode {
     Add(Param, Param, Param),
     Mult(Param, Param, Param),
+    Input(Param),
+    Output(Param),
     Quit,
 }
 
@@ -61,21 +63,37 @@ impl OpCode {
                 Param::decode(code, 3),
                 Param::decode(code, 4),
             ),
+            3 => OpCode::Input(Param::decode(code, 2)),
+            4 => OpCode::Output(Param::decode(code, 2)),
             99 => OpCode::Quit,
             unrecognized => panic!("unrecognized opcode: {}", unrecognized),
         }
     }
 
-    fn effect(&self, vm: &mut IntCode<'_>) {
+    fn effect(&self, vm: &mut IntCode<'_>) -> Option<i32> {
         use OpCode::*;
         match self {
             Add(a, b, o) => {
                 o.set(vm, 2, a.get(vm, 0) + b.get(vm, 1));
+                None
             }
             Mult(a, b, o) => {
                 o.set(vm, 2, a.get(vm, 0) * b.get(vm, 1));
+                None
             }
-            Quit => vm.on = false,
+            Input(o) => {
+                let v = vm.input.pop().unwrap();
+                o.set(vm, 0, v);
+                None
+            }
+            Output(i) => {
+                let v = i.get(vm, 0);
+                Some(v)
+            }
+            Quit => {
+                vm.on = false;
+                None
+            }
         }
     }
 
@@ -84,28 +102,38 @@ impl OpCode {
 
         match self {
             Add(_, _, _) | Mult(_, _, _) => 4,
+            Input(_) | Output(_) => 2,
             Quit => 1,
         }
     }
 }
 
 impl<'a> IntCode<'a> {
-    pub fn new(space: &'a mut [i32]) -> IntCode<'a> {
+    pub fn new(space: &'a mut [i32], input: Vec<i32>) -> IntCode<'a> {
         let on = true;
         let ip = 0;
 
-        IntCode { space, on, ip }
+        IntCode {
+            space,
+            on,
+            ip,
+            input,
+        }
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> Vec<i32> {
+        let mut output = Vec::new();
         while self.on {
             let opcode = OpCode::decode(self[self.ip]);
-            dbg!(&opcode);
 
-            opcode.effect(self);
+            if let Some(out) = opcode.effect(self) {
+                output.push(out);
+            }
 
             self.ip += opcode.stride() as i32;
         }
+
+        output
     }
 }
 
@@ -138,11 +166,19 @@ mod test {
     #[test]
     fn test_basic() {
         let mut buf = [1, 9, 10, 3, 2, 3, 11, 0, 99, 30, 40, 50];
-        let mut machine = IntCode::new(&mut buf);
+        let mut machine = IntCode::new(&mut buf, vec![]);
 
         machine.run();
 
         assert_eq!(machine.space[0], 3500);
+    }
+
+    #[test]
+    fn basic_io() {
+        let mut buf = [3, 0, 4, 0, 99];
+        let mut machine = IntCode::new(&mut buf, vec![42]);
+
+        assert_eq!(machine.run(), vec![42]);
     }
 
     #[test]
