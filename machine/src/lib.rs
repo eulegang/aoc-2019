@@ -45,6 +45,11 @@ enum OpCode {
     Mult(Param, Param, Param),
     Input(Param),
     Output(Param),
+    JumpTrue(Param, Param),
+    JumpFalse(Param, Param),
+    LessThan(Param, Param, Param),
+    Equals(Param, Param, Param),
+
     Quit,
 }
 
@@ -65,6 +70,18 @@ impl OpCode {
             ),
             3 => OpCode::Input(Param::decode(code, 2)),
             4 => OpCode::Output(Param::decode(code, 2)),
+            5 => OpCode::JumpTrue(Param::decode(code, 2), Param::decode(code, 3)),
+            6 => OpCode::JumpFalse(Param::decode(code, 2), Param::decode(code, 3)),
+            7 => OpCode::LessThan(
+                Param::decode(code, 2),
+                Param::decode(code, 3),
+                Param::decode(code, 4),
+            ),
+            8 => OpCode::Equals(
+                Param::decode(code, 2),
+                Param::decode(code, 3),
+                Param::decode(code, 4),
+            ),
             99 => OpCode::Quit,
             unrecognized => panic!("unrecognized opcode: {}", unrecognized),
         }
@@ -90,6 +107,42 @@ impl OpCode {
                 let v = i.get(vm, 0);
                 Some(v)
             }
+            JumpTrue(val, addr) => {
+                if val.get(vm, 0) != 0 {
+                    vm.ip = addr.get(vm, 1)
+                }
+
+                None
+            }
+
+            JumpFalse(val, addr) => {
+                if val.get(vm, 0) == 0 {
+                    vm.ip = addr.get(vm, 1)
+                }
+
+                None
+            }
+
+            LessThan(a, b, o) => {
+                if a.get(vm, 0) < b.get(vm, 1) {
+                    o.set(vm, 2, 1)
+                } else {
+                    o.set(vm, 2, 0)
+                }
+
+                None
+            }
+
+            Equals(a, b, o) => {
+                if a.get(vm, 0) == b.get(vm, 1) {
+                    o.set(vm, 2, 1)
+                } else {
+                    o.set(vm, 2, 0)
+                }
+
+                None
+            }
+
             Quit => {
                 vm.on = false;
                 None
@@ -97,13 +150,20 @@ impl OpCode {
         }
     }
 
-    fn stride(&self) -> usize {
+    fn stride(&self, vm: &IntCode) -> Option<usize> {
         use OpCode::*;
 
         match self {
-            Add(_, _, _) | Mult(_, _, _) => 4,
-            Input(_) | Output(_) => 2,
-            Quit => 1,
+            Add(_, _, _) | Mult(_, _, _) => Some(4),
+            LessThan(_, _, _) | Equals(_, _, _) => Some(4),
+            Input(_) | Output(_) => Some(2),
+            JumpTrue(val, _) if val.get(vm, 0) == 0 => Some(2),
+            JumpFalse(val, _) if val.get(vm, 0) != 0 => Some(2),
+            Quit => Some(1),
+
+            // Auto Jumps
+            JumpTrue(_, _) => None,
+            JumpFalse(_, _) => None,
         }
     }
 }
@@ -125,12 +185,15 @@ impl<'a> IntCode<'a> {
         let mut output = Vec::new();
         while self.on {
             let opcode = OpCode::decode(self[self.ip]);
+            println!("{:?}", opcode);
 
             if let Some(out) = opcode.effect(self) {
                 output.push(out);
             }
 
-            self.ip += opcode.stride() as i32;
+            if let Some(stride) = opcode.stride(self) {
+                self.ip += stride as i32;
+            }
         }
 
         output
