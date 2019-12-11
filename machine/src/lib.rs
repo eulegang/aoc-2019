@@ -1,40 +1,68 @@
+use std::fmt::{Display, Formatter, Result as FmtResult};
+
 #[derive(Debug)]
-pub struct IntCode<'a> {
-    space: &'a mut [i32],
+pub struct IntCode {
+    space: Vec<i32>,
     input: Vec<i32>,
     on: bool,
     ip: i32,
 }
 
+macro_rules! param_arg {
+    ($machine: expr, $code: expr, $offset: literal) => {
+        Param::digit(
+            $machine[$machine.ip + 1 + $offset],
+            dec_digit($code, 2 + $offset),
+        )
+    };
+}
+
+#[inline]
+fn dec_digit(base: i32, digit: u32) -> i32 {
+    let mut r = base;
+    r = r % 10i32.pow(digit + 1);
+    r = r / 10i32.pow(digit);
+
+    r
+}
+
 #[derive(Debug, PartialEq)]
 enum Param {
-    Pos,
-    Inter,
+    Pos(i32),
+    Inter(i32),
+}
+
+impl Display for Param {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            Param::Pos(addr) => write!(fmt, "%0x{:04x}", addr),
+            Param::Inter(val) => write!(fmt, "0x{:04x}", val),
+        }?;
+
+        Ok(())
+    }
 }
 
 impl Param {
-    fn decode(code: i32, pos: u32) -> Param {
-        match code % (10i32.pow(pos + 1)) / (1 * 10i32.pow(pos)) {
-            0 => Param::Pos,
-            1 => Param::Inter,
-            otherwise => panic!("Undefined parameter mode: {}", otherwise),
+    fn digit(code: i32, encode: i32) -> Param {
+        match encode {
+            0 => Param::Pos(code),
+            1 => Param::Inter(code),
+            _ => panic!("Invalid Argument mode: {}", encode),
         }
     }
 
-    fn get(&self, vm: &IntCode<'_>, arg_pos: i32) -> i32 {
+    fn get(&self, vm: &IntCode) -> i32 {
         match self {
-            Param::Pos => vm[vm[vm.ip + 1 + arg_pos]],
-            Param::Inter => vm[vm.ip + 1 + arg_pos],
+            Param::Pos(addr) => vm[*addr],
+            Param::Inter(val) => *val,
         }
     }
 
-    fn set(&self, vm: &mut IntCode<'_>, arg_pos: i32, value: i32) {
+    fn set(&self, vm: &mut IntCode, value: i32) {
         match self {
-            Param::Pos => {
-                let addr = vm[vm.ip + 1 + arg_pos];
-                vm[addr] = value
-            }
-            Param::Inter => panic!("can not set in intermediate mode"),
+            Param::Pos(addr) => vm[*addr] = value,
+            Param::Inter(_) => panic!("can not set in intermediate mode"),
         }
     }
 }
@@ -53,91 +81,77 @@ enum OpCode {
     Quit,
 }
 
-impl OpCode {
-    fn decode(code: i32) -> OpCode {
-        let op = code % 100;
+impl Display for OpCode {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> FmtResult {
+        use OpCode::*;
+        match self {
+            Add(a, b, o) => write!(fmt, "ADD  {}, {}, {}", a, b, o)?,
+            Mult(a, b, o) => write!(fmt, "MULT {}, {}, {}", a, b, o)?,
+            Input(a) => write!(fmt, "IN   {}", a)?,
+            Output(a) => write!(fmt, "OUT  {}", a)?,
+            JumpTrue(a, b) => write!(fmt, "JT   {}, {}", a, b)?,
+            JumpFalse(a, b) => write!(fmt, "JF   {}, {}", a, b)?,
+            LessThan(a, b, o) => write!(fmt, "LT   {}, {}, {}", a, b, o)?,
+            Equals(a, b, o) => write!(fmt, "EQ   {}, {}, {}", a, b, o)?,
+            Quit => write!(fmt, "QT")?,
+        };
 
-        match op {
-            1 => OpCode::Add(
-                Param::decode(code, 2),
-                Param::decode(code, 3),
-                Param::decode(code, 4),
-            ),
-            2 => OpCode::Mult(
-                Param::decode(code, 2),
-                Param::decode(code, 3),
-                Param::decode(code, 4),
-            ),
-            3 => OpCode::Input(Param::decode(code, 2)),
-            4 => OpCode::Output(Param::decode(code, 2)),
-            5 => OpCode::JumpTrue(Param::decode(code, 2), Param::decode(code, 3)),
-            6 => OpCode::JumpFalse(Param::decode(code, 2), Param::decode(code, 3)),
-            7 => OpCode::LessThan(
-                Param::decode(code, 2),
-                Param::decode(code, 3),
-                Param::decode(code, 4),
-            ),
-            8 => OpCode::Equals(
-                Param::decode(code, 2),
-                Param::decode(code, 3),
-                Param::decode(code, 4),
-            ),
-            99 => OpCode::Quit,
-            unrecognized => panic!("unrecognized opcode: {}", unrecognized),
-        }
+        Ok(())
     }
+}
 
-    fn effect(&self, vm: &mut IntCode<'_>) -> Option<i32> {
+impl OpCode {
+    fn effect(&self, vm: &mut IntCode) -> Option<i32> {
         use OpCode::*;
         match self {
             Add(a, b, o) => {
-                o.set(vm, 2, a.get(vm, 0) + b.get(vm, 1));
+                o.set(vm, a.get(vm) + b.get(vm));
                 None
             }
             Mult(a, b, o) => {
-                o.set(vm, 2, a.get(vm, 0) * b.get(vm, 1));
+                o.set(vm, a.get(vm) * b.get(vm));
                 None
             }
             Input(o) => {
                 let v = vm.input.pop().unwrap();
-                o.set(vm, 0, v);
+                o.set(vm, v);
                 None
             }
             Output(i) => {
-                let v = i.get(vm, 0);
+                let v = i.get(vm);
                 Some(v)
             }
             JumpTrue(val, addr) => {
-                if val.get(vm, 0) != 0 {
-                    vm.ip = addr.get(vm, 1)
+                if val.get(vm) != 0 {
+                    vm.ip = addr.get(vm)
                 }
 
                 None
             }
 
             JumpFalse(val, addr) => {
-                if val.get(vm, 0) == 0 {
-                    vm.ip = addr.get(vm, 1)
+                if val.get(vm) == 0 {
+                    vm.ip = addr.get(vm)
                 }
 
                 None
             }
 
             LessThan(a, b, o) => {
-                if a.get(vm, 0) < b.get(vm, 1) {
-                    o.set(vm, 2, 1)
+                if a.get(vm) < b.get(vm) {
+                    o.set(vm, 1)
                 } else {
-                    o.set(vm, 2, 0)
+                    o.set(vm, 0)
                 }
 
                 None
             }
 
             Equals(a, b, o) => {
-                if a.get(vm, 0) == b.get(vm, 1) {
-                    o.set(vm, 2, 1)
+                if a.get(vm) == b.get(vm) {
+                    o.set(vm, 1)
                 } else {
-                    o.set(vm, 2, 0)
+                    o.set(vm, 0)
                 }
 
                 None
@@ -150,6 +164,21 @@ impl OpCode {
         }
     }
 
+    fn real(&self, vm: &IntCode) -> String {
+        use OpCode::*;
+        match self {
+            Add(a, b, _) => format!("{} + {}", a.get(vm), b.get(vm)),
+            Mult(a, b, _) => format!("{} * {}", a.get(vm), b.get(vm)),
+            Input(_) => format!(""),
+            Output(a) => format!("{}", a.get(vm)),
+            JumpTrue(a, b) => format!("{}, {}", a.get(vm), b.get(vm)),
+            JumpFalse(a, b) => format!("{}, {}", a.get(vm), b.get(vm)),
+            LessThan(a, b, _) => format!("{} < {}", a.get(vm), b.get(vm)),
+            Equals(a, b, _) => format!("{} = {}", a.get(vm), b.get(vm)),
+            Quit => format!(""),
+        }
+    }
+
     fn stride(&self, vm: &IntCode) -> Option<usize> {
         use OpCode::*;
 
@@ -157,8 +186,8 @@ impl OpCode {
             Add(_, _, _) | Mult(_, _, _) => Some(4),
             LessThan(_, _, _) | Equals(_, _, _) => Some(4),
             Input(_) | Output(_) => Some(2),
-            JumpTrue(val, _) if val.get(vm, 0) == 0 => Some(2),
-            JumpFalse(val, _) if val.get(vm, 0) != 0 => Some(2),
+            JumpTrue(val, _) if val.get(vm) == 0 => Some(3),
+            JumpFalse(val, _) if val.get(vm) != 0 => Some(3),
             Quit => Some(1),
 
             // Auto Jumps
@@ -168,8 +197,8 @@ impl OpCode {
     }
 }
 
-impl<'a> IntCode<'a> {
-    pub fn new(space: &'a mut [i32], input: Vec<i32>) -> IntCode<'a> {
+impl<'a> IntCode {
+    pub fn new(space: Vec<i32>, input: Vec<i32>) -> IntCode {
         let on = true;
         let ip = 0;
 
@@ -184,8 +213,11 @@ impl<'a> IntCode<'a> {
     pub fn run(&mut self) -> Vec<i32> {
         let mut output = Vec::new();
         while self.on {
-            let opcode = OpCode::decode(self[self.ip]);
-            println!("{:?}", opcode);
+            let opcode = self.decode_op();
+
+            if cfg!(debug_assertions) {
+                eprintln!("0x{:04x}: {} ({})", self.ip, opcode, opcode.real(self));
+            }
 
             if let Some(out) = opcode.effect(self) {
                 output.push(out);
@@ -198,9 +230,43 @@ impl<'a> IntCode<'a> {
 
         output
     }
+
+    fn decode_op(&self) -> OpCode {
+        let code = self[self.ip];
+        let op = code % 100;
+
+        match op {
+            1 => OpCode::Add(
+                param_arg!(self, code, 0),
+                param_arg!(self, code, 1),
+                param_arg!(self, code, 2),
+            ),
+            2 => OpCode::Mult(
+                param_arg!(self, code, 0),
+                param_arg!(self, code, 1),
+                param_arg!(self, code, 2),
+            ),
+            3 => OpCode::Input(param_arg!(self, code, 0)),
+            4 => OpCode::Output(param_arg!(self, code, 0)),
+            5 => OpCode::JumpTrue(param_arg!(self, code, 0), param_arg!(self, code, 1)),
+            6 => OpCode::JumpFalse(param_arg!(self, code, 0), param_arg!(self, code, 1)),
+            7 => OpCode::LessThan(
+                param_arg!(self, code, 0),
+                param_arg!(self, code, 1),
+                param_arg!(self, code, 2),
+            ),
+            8 => OpCode::Equals(
+                param_arg!(self, code, 0),
+                param_arg!(self, code, 1),
+                param_arg!(self, code, 2),
+            ),
+            99 => OpCode::Quit,
+            unrecognized => panic!("unrecognized opcode: {}", unrecognized),
+        }
+    }
 }
 
-impl<'a> std::ops::Index<i32> for IntCode<'a> {
+impl std::ops::Index<i32> for IntCode {
     type Output = i32;
 
     fn index(&self, pos: i32) -> &i32 {
@@ -212,7 +278,7 @@ impl<'a> std::ops::Index<i32> for IntCode<'a> {
     }
 }
 
-impl<'a> std::ops::IndexMut<i32> for IntCode<'a> {
+impl std::ops::IndexMut<i32> for IntCode {
     fn index_mut(&mut self, pos: i32) -> &mut i32 {
         if pos < 0 {
             panic!("addresses may not be negative")
@@ -228,8 +294,8 @@ mod test {
 
     #[test]
     fn test_basic() {
-        let mut buf = [1, 9, 10, 3, 2, 3, 11, 0, 99, 30, 40, 50];
-        let mut machine = IntCode::new(&mut buf, vec![]);
+        let prog = vec![1, 9, 10, 3, 2, 3, 11, 0, 99, 30, 40, 50];
+        let mut machine = IntCode::new(prog, vec![]);
 
         machine.run();
 
@@ -238,15 +304,9 @@ mod test {
 
     #[test]
     fn basic_io() {
-        let mut buf = [3, 0, 4, 0, 99];
-        let mut machine = IntCode::new(&mut buf, vec![42]);
+        let prog = vec![3, 0, 4, 0, 99];
+        let mut machine = IntCode::new(prog, vec![42]);
 
         assert_eq!(machine.run(), vec![42]);
-    }
-
-    #[test]
-    fn param_mode() {
-        assert_eq!(Param::decode(10, 2), Param::Pos);
-        assert_eq!(Param::decode(100, 2), Param::Inter);
     }
 }
