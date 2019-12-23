@@ -113,7 +113,7 @@ impl OpCode {
                 None
             }
             Input(o) => {
-                let v = vm.input.pop().unwrap();
+                let v = vm.input.remove(0);
                 o.set(vm, v);
                 None
             }

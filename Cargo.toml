@@ -6,6 +6,8 @@ members = [
 	"day-4",
 	"day-5",
 
+	"day-7",
+
 	"utils",
 	"machine"
 ]
